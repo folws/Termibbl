@@ -6,21 +6,15 @@ use tui::style::Color;
 pub struct Username(String);
 
 impl From<String> for Username {
-    fn from(s: String) -> Self {
-        Username(s)
-    }
+    fn from(s: String) -> Self { Username(s) }
 }
 
 impl From<Username> for String {
-    fn from(u: Username) -> Self {
-        u.0
-    }
+    fn from(u: Username) -> Self { u.0 }
 }
 
 impl Display for Username {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, Serialize, Deserialize)]
@@ -39,20 +33,14 @@ impl PartialOrd for Coord {
 }
 
 impl Coord {
-    pub fn within(&self, a: &Coord, b: &Coord) -> bool {
-        self > a.min(b) && self < a.max(b)
-    }
+    pub fn within(&self, a: &Coord, b: &Coord) -> bool { self > a.min(b) && self < a.max(b) }
 }
 
 impl From<(i16, i16)> for Coord {
-    fn from(x: (i16, i16)) -> Self {
-        Coord(x.0 as u16, x.1 as u16)
-    }
+    fn from(x: (i16, i16)) -> Self { Coord(x.0 as u16, x.1 as u16) }
 }
 impl From<Coord> for (i16, i16) {
-    fn from(c: Coord) -> Self {
-        (c.0 as i16, c.1 as i16)
-    }
+    fn from(c: Coord) -> Self { (c.0 as i16, c.1 as i16) }
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -63,51 +51,11 @@ pub struct Line {
 }
 
 impl Line {
-    pub fn new(start: Coord, end: Coord, color: CanvasColor) -> Self {
-        Line { start, end, color }
-    }
+    pub fn new(start: Coord, end: Coord, color: CanvasColor) -> Self { Line { start, end, color } }
     pub fn coords_in(&self) -> Vec<Coord> {
         line_drawing::Bresenham::new(self.start.into(), self.end.into())
             .map(Coord::from)
             .collect()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Message {
-    SystemMsg(String),
-    UserMsg(Username, String),
-}
-
-impl Message {
-    pub fn text(&self) -> &str {
-        match self {
-            Message::SystemMsg(msg) => &msg,
-            Message::UserMsg(_, msg) => &msg,
-        }
-    }
-
-    pub fn is_system(&self) -> bool {
-        match self {
-            Message::SystemMsg(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn username(&self) -> Option<&Username> {
-        match self {
-            Message::UserMsg(username, _) => Some(username),
-            _ => None,
-        }
-    }
-}
-
-impl Display for Message {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Message::SystemMsg(msg) => write!(f, "{}", msg),
-            Message::UserMsg(user, msg) => write!(f, "{}: {}", user, msg),
-        }
     }
 }
 

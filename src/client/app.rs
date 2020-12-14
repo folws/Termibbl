@@ -51,9 +51,7 @@ impl AppCanvas {
 }
 
 impl AppCanvas {
-    pub fn draw_line(&mut self, line: Line) {
-        self.lines.push(line);
-    }
+    pub fn draw_line(&mut self, line: Line) { self.lines.push(line); }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -157,7 +155,7 @@ impl App {
                 } else {
                     let message =
                         Message::UserMsg(self.session.username.clone(), self.chat.input.clone());
-                    self.session.send(ToServerMsg::NewMessage(message)).await?;
+                    self.session.send(ToServerMsg::Chat(message)).await?;
                 }
                 self.chat.input = String::new();
             }
