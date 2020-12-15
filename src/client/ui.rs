@@ -1,99 +1,135 @@
+use crate::server::skribbl::SkribblState;
 use crate::{
     client::app::{App, AppCanvas},
     client::error::Result,
     data::{Coord, Message},
-    server::skribbl::{PlayerState, SkribblState},
 };
 
+use super::app::AppState;
+use super::ServerSession;
 use super::Username;
+use log::info;
+use tui::Frame;
 use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     widgets::{Block, Borders, List, Paragraph, Text, Widget},
-    Terminal,
 };
 
-pub fn draw<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()> {
-    let dimensions = app.canvas.dimensions;
-    terminal.draw(|mut f| {
-        use Constraint::*;
-        let size = f.size();
-        let main_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .margin(0)
-            .constraints(
-                [
-                    Length(dimensions.0 as u16),
-                    Length(if size.width < dimensions.0 as u16 {
-                        size.width
-                    } else {
-                        size.width - dimensions.0 as u16
-                    }),
-                ]
-                .as_ref(),
-            )
-            .split(size);
+fn show_disconnected<B: Backend>(f: &mut Frame<B>) {
+    let layout = Layout::default()
+        .margin(4)
+        .constraints([Constraint::Min(0)])
+        .split(f.size());
 
-        let canvas_widget = CanvasWidget::new(
-            &app.canvas,
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(app.current_color.into())),
-        );
+    f.render_widget(
+        Paragraph::new([Text::Raw("Disconnected, [R] to reconnect.".into())].iter()),
+        layout[0],
+    );
+}
 
-        let game_state_height = app
-            .game_state
-            .as_ref()
-            .map(|x| x.player_states.len() + 3)
-            .unwrap_or(0) as u16;
+fn show_idle<B: Backend>(f: &mut Frame<B>, session: ServerSession) {}
 
-        let sidebar_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(0)
-            .constraints([Length(game_state_height), Percentage(100)].as_ref())
-            .split(main_chunks[1]);
-
-        if let Some(skribbl_state) = app.game_state.as_mut() {
-            let skribbl_widget = SkribblStateWidget::new(
-                &skribbl_state,
-                &app.session.username,
-                app.remaining_time.unwrap_or(0),
-                Block::default().borders(Borders::NONE),
-            );
-            f.render_widget(skribbl_widget, sidebar_chunks[0]);
+pub fn draw<B: Backend>(app: &App, f: &mut Frame<B>) {
+    match app.state {
+        AppState::Disconnected {
+            last_connected_server,
+            last_username,
+            number_of_retries,
+        } => {
+            show_disconnected(f);
         }
+        AppState::Idle { session } => show_idle(f, session),
+        AppState::Playing {
+            canvas,
+            chat,
+            session,
+            last_mouse_pos,
+            current_color,
+            game_state,
+            remaining_time,
+        } => {}
+    };
 
-        let canvas_rect = Rect {
-            height: u16::min(dimensions.1 as u16, main_chunks[0].height),
-            ..main_chunks[0]
-        };
-        f.render_widget(canvas_widget, canvas_rect);
+    info!("drawing now.");
 
-        let displayed_messages = (&app.chat.messages)
-            .iter()
-            .filter(|msg| match msg {
-                Message::SystemMsg(_) => true,
-                Message::UserMsg(username, _) => app.game_state.as_ref().map_or(true, |state| {
-                    app.is_drawing()
-                        || app.own_player().map_or(false, |x| x.has_solved)
-                        || (&state.drawing_user != username
-                            && !state
-                                .player_states
-                                .get(&username)
-                                .map_or(false, |player_state| player_state.has_solved))
-                }),
-            })
-            .collect::<Vec<_>>();
+    // let dimensions = app.canvas.dimensions;
+    // use Constraint::*;
+    // let size = f.size();
+    // let main_chunks = Layout::default()
+    //     .direction(Direction::Horizontal)
+    //     .margin(0)
+    //     .constraints(
+    //         [
+    //             Length(dimensions.0 as u16),
+    //             Length(if size.width < dimensions.0 as u16 {
+    //                 size.width
+    //             } else {
+    //                 size.width - dimensions.0 as u16
+    //             }),
+    //         ]
+    //         .as_ref(),
+    //     )
+    //     .split(size);
 
-        let chat_widget = ChatWidget::new(
-            displayed_messages.as_slice(),
-            &app.chat.input,
-            Block::default().borders(Borders::NONE),
-        );
-        f.render_widget(chat_widget, sidebar_chunks[1]);
-    })?;
-    Ok(())
+    // let canvas_widget = CanvasWidget::new(
+    //     &app.canvas,
+    //     Block::default()
+    //         .borders(Borders::ALL)
+    //         .border_style(Style::default().fg(app.current_color.into())),
+    // );
+
+    // let game_state_height = app
+    //     .game_state
+    //     .as_ref()
+    //     .map(|x| x.players.len() + 3)
+    //     .unwrap_or(0) as u16;
+
+    // let sidebar_chunks = Layout::default()
+    //     .direction(Direction::Vertical)
+    //     .margin(0)
+    //     .constraints([Length(game_state_height), Percentage(100)].as_ref())
+    //     .split(main_chunks[1]);
+
+    // // if let Some(skribbl_state) = app.game_state.as_mut() {
+    // //     let skribbl_widget = SkribblStateWidget::new(
+    // //         &skribbl_state,
+    // //         &app.session.username,
+    // //         app.remaining_time.unwrap_or(0),
+    // //         Block::default().borders(Borders::NONE),
+    // //     );
+    // //     f.render_widget(skribbl_widget, sidebar_chunks[0]);
+    // // }
+
+    // let canvas_rect = Rect {
+    //     height: u16::min(dimensions.1 as u16, main_chunks[0].height),
+    //     ..main_chunks[0]
+    // };
+    // f.render_widget(canvas_widget, canvas_rect);
+
+    // let displayed_messages = (&app.chat.messages).iter().collect::<Vec<_>>();
+
+    // let chat_widget = ChatWidget::new(
+    //     displayed_messages.as_slice(),
+    //     &app.chat.input,
+    //     Block::default().borders(Borders::NONE),
+    // );
+
+    // f.render_widget(chat_widget, sidebar_chunks[1]);
+}
+
+fn create_main_window<B>(f: &mut Frame<B>, app: &App)
+where
+    B: Backend,
+{
+    let chunks = Layout::default()
+        .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+        .split(f.size());
+
+    let block = Block::default().title("Block").borders(Borders::ALL);
+
+    f.render_widget(block, f.size());
 }
 
 pub struct CanvasWidget<'a, 't> {
@@ -178,92 +214,92 @@ impl<'a, 't, 'b> Widget for ChatWidget<'a, 't> {
     }
 }
 
-pub struct SkribblStateWidget<'a, 't> {
-    block: Block<'a>,
-    state: &'t SkribblState,
-    username: &'t Username,
-    remaining_time: u32,
-}
-impl<'a, 't> SkribblStateWidget<'a, 't> {
-    pub fn new(
-        state: &'t SkribblState,
-        username: &'t Username,
-        remaining_time: u32,
-        block: Block<'a>,
-    ) -> SkribblStateWidget<'a, 't> {
-        SkribblStateWidget {
-            block,
-            state,
-            username,
-            remaining_time,
-        }
-    }
-}
+// pub struct SkribblStateWidget<'a, 't> {
+//     block: Block<'a>,
+//     state: &'t SkribblState,
+//     username: &'t Username,
+//     remaining_time: u32,
+// }
+// impl<'a, 't> SkribblStateWidget<'a, 't> {
+//     pub fn new(
+//         state: &'t SkribblState,
+//         username: &'t Username,
+//         remaining_time: u32,
+//         block: Block<'a>,
+//     ) -> SkribblStateWidget<'a, 't> {
+//         SkribblStateWidget {
+//             block,
+//             state,
+//             username,
+//             remaining_time,
+//         }
+//     }
+// }
 
-impl<'a, 't, 'b> Widget for SkribblStateWidget<'a, 't> {
-    fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
-        self.block.render(area, buf);
-        let area = self.block.inner(area);
+// impl<'a, 't, 'b> Widget for SkribblStateWidget<'a, 't> {
+//     fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
+//         self.block.render(area, buf);
+//         let area = self.block.inner(area);
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(0)
-            .constraints([Constraint::Length(1), Constraint::Percentage(100)].as_ref())
-            .split(area);
+//         let chunks = Layout::default()
+//             .direction(Direction::Vertical)
+//             .margin(0)
+//             .constraints([Constraint::Length(1), Constraint::Percentage(100)].as_ref())
+//             .split(area);
 
-        let is_drawing = self.state.drawing_user == *self.username;
+//         let is_drawing = self.state.drawing_user == *self.username;
 
-        let current_word_representation = if is_drawing {
-            self.state.current_word().to_string()
-        } else {
-            self.state.hinted_current_word().to_string()
-        };
+//         let current_word_representation = if is_drawing {
+//             self.state.current_word().to_string()
+//         } else {
+//             self.state.hinted_current_word().to_string()
+//         };
 
-        Paragraph::new(
-            [Text::Styled(
-                format!(
-                    "{} drawing {}",
-                    self.state.drawing_user, current_word_representation
-                )
-                .into(),
-                if is_drawing {
-                    Style::default().bg(Color::Red)
-                } else {
-                    Style::default()
-                },
-            )]
-            .iter(),
-        )
-        .render(chunks[0], buf);
+//         Paragraph::new(
+//             [Text::Styled(
+//                 format!(
+//                     "{} drawing {}",
+//                     self.state.drawing_user, current_word_representation
+//                 )
+//                 .into(),
+//                 if is_drawing {
+//                     Style::default().bg(Color::Red)
+//                 } else {
+//                     Style::default()
+//                 },
+//             )]
+//             .iter(),
+//         )
+//         .render(chunks[0], buf);
 
-        let mut sorted_player_entries = self
-            .state
-            .player_states
-            .iter()
-            .collect::<Vec<(&Username, &PlayerState)>>();
-        sorted_player_entries.sort_by_key(|(x, _)| *x);
+//         let mut sorted_player_entries = self
+//             .state
+//             .player_states
+//             .iter()
+//             .collect::<Vec<(&Username, &PlayerState)>>();
+//         sorted_player_entries.sort_by_key(|(x, _)| *x);
 
-        List::new(
-            sorted_player_entries
-                .into_iter()
-                .map(|(username, player_state)| {
-                    Text::styled(
-                        format!("{}: {}", username, player_state.score,),
-                        if self.state.drawing_user == *username {
-                            Style::default().bg(tui::style::Color::Cyan)
-                        } else if self.state.has_solved(username) {
-                            Style::default().fg(tui::style::Color::Green)
-                        } else {
-                            Style::default()
-                        },
-                    )
-                }),
-        )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(&format!("Players [time: {}]", self.remaining_time)),
-        )
-        .render(chunks[1], buf);
-    }
-}
+//         List::new(
+//             sorted_player_entries
+//                 .into_iter()
+//                 .map(|(username, player_state)| {
+//                     Text::styled(
+//                         format!("{}: {}", username, player_state.score,),
+//                         if self.state.drawing_user == *username {
+//                             Style::default().bg(tui::style::Color::Cyan)
+//                         } else if self.state.has_solved(username) {
+//                             Style::default().fg(tui::style::Color::Green)
+//                         } else {
+//                             Style::default()
+//                         },
+//                     )
+//                 }),
+//         )
+//         .block(
+//             Block::default()
+//                 .borders(Borders::ALL)
+//                 .title(&format!("Players [time: {}]", self.remaining_time)),
+//         )
+//         .render(chunks[1], buf);
+//     }
+// }

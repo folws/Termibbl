@@ -7,7 +7,7 @@ pub struct Username(String);
 
 impl From<String> for Username {
     fn from(s: String) -> Self {
-        Username(s)
+        Username(s.trim().to_owned())
     }
 }
 
@@ -73,6 +73,9 @@ impl Line {
     }
 }
 
+/// For now a DrawCanvas to server and client is a `Vec` containing `Line`
+pub type DrawCanvas = Vec<Line>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
     SystemMsg(String),
@@ -111,24 +114,46 @@ impl Display for Message {
     }
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-pub enum CanvasColor {
-    White,
-    Gray,
-    DarkGray,
-    Black,
-    Red,
-    LightRed,
-    Green,
-    LightGreen,
-    Blue,
-    LightBlue,
-    Yellow,
-    LightYellow,
-    Cyan,
-    LightCyan,
-    Magenta,
-    LightMagenta,
+macro_rules! gen_eq {
+    (enum $name:ident {
+        $($vname:ident,)*
+    }) => {
+
+        #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+        pub enum $name {
+             $($vname,)*
+        }
+
+        impl $name {
+            pub fn v_eq(&self, b: &Self) -> bool {
+                match (self, b) {
+                    $((&$name::$vname, &$name::$vname) => true,)*
+                    _ => false,
+                }
+            }
+        }
+    }
+}
+
+gen_eq! {
+    enum CanvasColor {
+        White,
+        Gray,
+        DarkGray,
+        Black,
+        Red,
+        LightRed,
+        Green,
+        LightGreen,
+        Blue,
+        LightBlue,
+        Yellow,
+        LightYellow,
+        Cyan,
+        LightCyan,
+        Magenta,
+        LightMagenta,
+    }
 }
 
 impl From<CanvasColor> for Color {
@@ -157,4 +182,32 @@ impl From<CanvasColor> for Color {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CommandMsg {
     KickPlayer(Username),
+}
+
+/// Combines two different values having the same associated types into a single
+/// type.
+#[derive(Debug, Clone)]
+pub enum Either<A, B> {
+    /// First branch of the type
+    Left(A),
+    /// Second branch of the type
+    Right(B),
+}
+
+impl<A, B> Either<A, B> {
+    pub fn left(&self) -> Option<&A> {
+        if let Either::Left(val) = self {
+            Some(val)
+        } else {
+            None
+        }
+    }
+
+    pub fn right(&self) -> Option<&B> {
+        if let Either::Right(val) = self {
+            Some(val)
+        } else {
+            None
+        }
+    }
 }
