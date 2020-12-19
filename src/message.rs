@@ -109,21 +109,26 @@ impl fmt::Display for ChatMessage {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum Draw {
+    Clear,
+    Line(Line)
+}
+
+// #[derive(actix::Message)]
+// #[rtype = "Option<Username>"]
+// pub struct RequestUsername(String);
+
+/// Server -> Client 
 #[derive(actix::Message, Debug, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
 pub struct ToClientMsg {}
 
+/// Client -> Server
 #[derive(actix::Message, Debug, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
 pub enum ToServerMsg {
     Chat(ChatMessage),
-    // CommandMsg(CommandMsg),
-    // NewLine(data::Line),
-    ClearCanvas,
+    Command(CommandMessage),
+    Draw(Draw)
 }
-
-// impl fmt::Display for ToServerMsg {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", match self {
-//         ToServerMsg::NewLine()
-//     }) }
-// }

@@ -1,5 +1,6 @@
-use super::server::ROUND_DURATION;
+use super::server::GameOpts;
 use crate::client::Username;
+use actix::prelude::*;
 use rand::{prelude::IteratorRandom, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -185,4 +186,8 @@ impl PlayerState {
 
 pub fn calculate_score_increase(remaining_time: u32) -> u32 {
     50 + (((remaining_time as f64 / ROUND_DURATION as f64) * 100f64) as u32 / 2u32)
+}
+
+impl Actor for SkribblState {
+    type Context = Context<Self>;
 }

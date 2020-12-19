@@ -1,9 +1,11 @@
+mod game_server;
 mod session;
 mod skribbl;
 
 use std::{
     collections::{BinaryHeap, HashMap},
     io::Read,
+    net::SocketAddr,
 };
 
 use actix::{io::FramedWrite, prelude::*};
@@ -15,13 +17,50 @@ use tokio::{
 };
 use tokio_util::codec::FramedRead;
 
-use crate::message::{GameMessage, ToClientMsg, ToServerMsg};
+use crate::{
+    client::Username,
+    message::{GameMessage, ToClientMsg, ToServerMsg},
+};
 
-use self::session::UserSession;
+use self::{
+    session::{ClientRef, ClientSession},
+    skribbl::SkribblState,
+};
 
 pub type ServerResult<T> = std::result::Result<T, ServerError>;
 
-struct ServerError {}
+#[derive(Debug)]
+pub enum ServerError {
+    UserNotFound(String),
+    SendError(String),
+    WsError(tungstenite::error::Error),
+    IOError(std::io::Error),
+}
+
+impl<T> From<tokio::sync::mpsc::error::SendError<T>> for ServerError {
+    fn from(err: tokio::sync::mpsc::error::SendError<T>) -> Self {
+        ServerError::SendError(err.to_string())
+    }
+}
+
+impl From<tungstenite::error::Error> for ServerError {
+    fn from(err: tungstenite::error::Error) -> Self {
+        ServerError::WsError(err)
+    }
+}
+
+impl From<std::io::Error> for ServerError {
+    fn from(err: std::io::Error) -> Self {
+        ServerError::IOError(err)
+    }
+}
+#[derive(Clone)]
+pub struct GameOpts {
+    pub(crate) dimensions: (usize, usize),
+    pub(crate) words: Box<(dyn Iterator<Item = String>)>,
+    pub(crate) number_of_rounds: usize,
+    pub(crate) round_duration: usize,
+}
 
 const DIMEN: (usize, usize) = (900, 60);
 const ROUND_DURATION: usize = 120;
@@ -127,10 +166,8 @@ pub async fn run_with_opts(opt: CliOpts) -> Result<(), ()> {
     info!("🚀 Running Termibbl server on {}...", addr);
 
     // start termibbl server actor
-    let game_server = GameServer::new(default_game_opts).start();
-
-    // listen and handle incoming connections in async thread.
-    let tcp_srv = TcpServer::create(move |ctx| {
+    let game_server = GameServer::create(move |ctx| {
+        // listen and handle incoming connections in async thread.
         ctx.add_message_stream(Box::leak(server_listener).incoming().map(|stream| {
             let st = stream.unwrap();
             let addr = st.peer_addr().unwrap();
@@ -138,76 +175,38 @@ pub async fn run_with_opts(opt: CliOpts) -> Result<(), ()> {
             TcpConnect(st, addr)
         }));
 
-        TcpServer { game_server }
+        GameServer::new(default_game_opts)
     });
 
     tokio::signal::ctrl_c().await.unwrap();
     println!("Ctrl-C received. Stopping..");
 
     // gracefully exit
-    tcp_srv.do_send(StopSignal);
+    game_server.do_send(StopSignal);
     Ok(())
-}
-
-struct TcpServer {
-    game_server: Addr<GameServer>,
-}
-
-impl Actor for TcpServer {
-    type Context = Context<Self>;
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-struct TcpConnect(pub TcpStream, pub std::net::SocketAddr);
-
-/// Handle stream of TcpStream's
-impl Handler<TcpConnect> for TcpServer {
-    type Result = ();
-
-    fn handle(&mut self, msg: TcpConnect, _: &mut Context<Self>) {
-        info!("new client connection: {}", msg.1);
-
-        let server = self.game_server.clone();
-        UserSession::create(move |ctx| {
-            let (r, w) = tokio::io::split(msg.0);
-            UserSession::add_stream(FramedRead::new(r, GameMessage::<ToServerMsg>::new()), ctx);
-
-            UserSession::new(
-                server,
-                FramedWrite::new(w, GameMessage::<ToClientMsg>::new(), ctx),
-                msg.1,
-            )
-        });
-    }
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-struct StopSignal;
-
-impl Handler<StopSignal> for TcpServer {
-    type Result = ();
-
-    fn handle(&mut self, msg: StopSignal, ctx: &mut Self::Context) -> Self::Result {
-        // pass stop signal to the game server
-        self.game_server.do_send(msg)
-    }
-}
-
-pub struct GameOpts {
-    pub(crate) dimensions: (usize, usize),
-    pub(crate) words: Box<(dyn Iterator<Item = String>)>,
-    pub(crate) number_of_rounds: usize,
-    pub(crate) round_duration: usize,
 }
 
 pub struct GameServer {
     default_game_opts: GameOpts,
-    connected_players: HashMap<usize, Addr<UserSession>>,
-    queue: Vec<usize>,
+    connected_players: HashMap<usize, Addr<ClientSession>>,
+    player_queue: Vec<usize>,
+    /// hold game rooms by their generated key.
+    rooms: HashMap<String, GameRoom>,
     // rooms: BinaryHeap<ServerRoom>,
     // private_rooms: HashMap<String, GameRoom>,
+}
+
+/// Helper functions for `GameServer`
+impl GameServer {
+    pub fn new(default_game_opts: GameOpts) -> Self {
+        Self {
+            default_game_opts,
+            player_queue: Vec::new(),
+            connected_players: HashMap::new(),
+            rooms: HashMap::new(),
+            // rooms: BinaryHeap::new(),
+        }
+    }
 }
 
 impl Actor for GameServer {
@@ -250,10 +249,43 @@ impl Actor for GameServer {
     }
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
+struct TcpConnect(pub TcpStream, pub std::net::SocketAddr);
+
+/// Handle stream of TcpStream's
+impl Handler<TcpConnect> for GameServer {
+    type Result = ();
+
+    fn handle(&mut self, msg: TcpConnect, ctx: &mut Context<Self>) {
+        info!("new client connection: {}", msg.1);
+
+        let server_ref = ctx.address();
+        let peer_addr = msg.1;
+
+        ClientSession::create(move |ctx| {
+            let (r, w) = tokio::io::split(msg.0);
+            ClientSession::add_stream(FramedRead::new(r, GameMessage::<ToServerMsg>::new()), ctx);
+
+            ClientSession::new(
+                server_ref,
+                FramedWrite::new(w, GameMessage::<ToClientMsg>::new(), ctx),
+                peer_addr,
+            )
+        });
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+struct StopSignal;
+
 impl Handler<StopSignal> for GameServer {
     type Result = ();
 
-    fn handle(&mut self, msg: StopSignal, ctx: &mut Self::Context) -> Self::Result { ctx.stop(); }
+    fn handle(&mut self, msg: StopSignal, ctx: &mut Self::Context) -> Self::Result {
+        ctx.stop();
+    }
 }
 
 /// Helper functions for `GameServer`
@@ -261,27 +293,71 @@ impl GameServer {
     pub fn new(default_game_opts: GameOpts) -> Self {
         Self {
             default_game_opts,
-            queue: Vec::new(),
+            player_queue: Vec::new(),
             connected_players: HashMap::new(),
-            // private_rooms: HashMap::new(),
+            rooms: HashMap::new(),
             // rooms: BinaryHeap::new(),
         }
     }
 
-    fn spawn_room(&mut self, ctx: &mut Context<Self>) {
-        // create a new game room actor with default opts,
+    fn generate_room_key(&self) -> String {}
+
+    /// create a new game room actor with default opts,
+    fn create_game_room(&mut self, ctx: &mut Context<Self>) -> String {
         debug!("Spawning a new game room session from default opts.");
 
-        // let addr = GameRoom::new(ctx.address(), self.default_game_opts.clone()).start();
-        // self.rooms.push(ServerRoom {
-        //     addr,
-        //     user_count: 0,
-        // });
+        let room_key = self.generate_room_key();
+        let room = GameRoom::new(self.default_game_opts.clone());
+
+        self.rooms.insert(room_key.clone(), room);
+
+        room_key
+    }
+
+    fn add_client_connection(
+        &mut self,
+        peer_addr: &SocketAddr,
+        session: Addr<ClientSession>,
+    ) -> usize {
+        // let id = rand::thread_rng().gen();
+        let id = 0;
+        debug!("({}): assigning idmessage <> {}", peer_addr, id);
+
+        self.connected_players.insert(id, session);
+
+        id
     }
 }
 
-pub struct GameRoom;
+#[derive(Message)]
+#[rtype(result = "usize")]
+pub struct NewClientSession(Addr<ClientSession>);
 
-impl Actor for GameRoom {
-    type Context = Context<Self>;
+impl Handler<NewClientSession> for GameServer {
+    type Result = usize;
+
+    fn handle(&mut self, msg: NewClientSession, ctx: &mut Self::Context) -> Self::Result {
+        self.add_client_connection(msg.0, msg.1)
+    }
+}
+
+pub enum GameState {
+    Lobby,
+    InGame(Addr<SkribblState>),
+}
+
+pub struct GameRoom {
+    state: GameState,
+    clients: HashMap<usize, ClientRef>,
+    game_opts: GameOpts,
+}
+
+impl GameRoom {
+    fn new(game_opts: GameOpts) -> Self {
+        Self {
+            state: GameState::Lobby,
+            clients: HashMap::new(),
+            game_opts,
+        }
+    }
 }

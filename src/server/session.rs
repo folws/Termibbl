@@ -5,7 +5,7 @@ use crate::{
     message::{ToClientMsg, ToServerMsg},
 };
 use data::Username;
-use log::{debug, info, trace};
+use log::*;
 
 use actix::prelude::*;
 use message::GameMessage;
@@ -19,14 +19,14 @@ pub type ClientMessageWriter =
     actix::io::FramedWrite<ToClientMsg, WriteHalf<TcpStream>, GameMessage<ToClientMsg>>;
 
 #[derive(Clone)]
-pub struct ServerUser {
+pub struct ClientRef {
     pub username: Username,
-    pub session: Addr<UserSession>,
+    pub session: Addr<ClientSession>,
     pub peer_addr: SocketAddr,
 }
 
-impl ServerUser {
-    pub fn new(session: Addr<UserSession>, username: Username, peer_addr: SocketAddr) -> Self {
+impl ClientRef {
+    pub fn new(session: Addr<ClientSession>, username: Username, peer_addr: SocketAddr) -> Self {
         Self {
             session,
             username,
@@ -46,67 +46,91 @@ enum UserState {
 }
 
 /// `UserSession` actor is responsible for TCP peer communications.
-pub struct UserSession {
+pub struct ClientSession {
     /// unique session id
     id: usize,
     peer_addr: SocketAddr,
-    username: Option<Username>,
-    server: Addr<GameServer>,
-    writer: ClientMessageWriter,
+    server_ref: Addr<GameServer>,
+    to_client_socket: ClientMessageWriter,
     state: UserState,
 }
 
-impl Actor for UserSession {
+/// Helper functions for `UserSession`
+impl ClientSession {
+    pub fn new(
+        server_ref: Addr<GameServer>,
+        to_client_socket: ClientMessageWriter,
+        peer_addr: SocketAddr,
+    ) -> Self {
+        Self {
+            id: 0,
+            state: UserState::Idle,
+            server_ref,
+            peer_addr,
+            to_client_socket,
+        }
+    }
+
+    /// Close this session's sink and stopping the actor
+    fn close(&mut self, ctx: &mut Context<Self>) {
+        // self.server
+        //     .send(ServerRequest::Disconnect(self.id))
+        //     .into_actor(self)
+        //     .then(|_, this, ctx| {
+        //         ctx.stop();
+        //         async {}.into_actor(this)
+        //     })
+        //     .wait(ctx);
+    }
+
+    fn is_ingame(&self) -> bool {
+        matches!(self.state, UserState:::InGame{ room: _})
+    }
+}
+
+impl Actor for ClientSession {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
         let peer_addr = self.peer_addr;
         debug!("started actor for client {}", peer_addr);
 
+        // inform the server of this client and
         // request a unique identifier from the server to make requests with
-        // self.server
-        //     .send(ServerRequest::Connect(ServerUser::new(
-        //         ctx.address(),
-        //         self.username.clone(),
-        //         peer_addr,
-        //     )))
-        //     .into_actor(self)
-        //     .then(move |res, act: &mut Self, _| {
-        //         if let Ok(id) = res {
-        //             act.id = id;
+        self.server
+            .send(NewClientSession((peer_addr, ctx.address())))
+            .into_actor(self)
+            .then(move |res, act: &mut Self, _| {
+                if let Ok(id) = res {
+                    act.id = id;
 
-        //             // TODO: let user choose to either join, search for or create a private gameroom, or just wait if they please
-        //             // for now send server request to join publc game room search session to the single default game room
-        //             act.server.do_send(ServerRequest::FindRoom {
-        //                 peer_addr: act.peer_addr,
-        //                 id: act.id,
-        //             });
+                    // // TODO: let user choose to either join, search for or create a private gameroom, or just wait if they please
+                    // // for now send server request to join publc game room search session to the single default game room
+                    // act.server.do_send(ServerRequest::FindRoom {
+                    //     peer_addr: act.peer_addr,
+                    //     id: act.id,
+                    // });
 
-        //             // update state to show in queue
-        //             act.state = UserState::InQueue;
-        //         }
-        //         async {}.into_actor(act)
-        //     })
-        //     .wait(ctx);
+                    // // update state to show in queue
+                    // act.state = UserState::InQueue;
+                }
+                async {}.into_actor(act)
+            })
+            .wait(ctx);
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
         debug!("stopping actor for {}", self.peer_addr);
 
-        // close websocket stream
-        // let mut sink = self.sink.take().unwrap();
-
-        // async move { sink.close().await }
-        //     .into_actor(self)
-        //     .then(move |_, _: &mut Self, _| actix::fut::ready(()))
-        //     .wait(ctx);
+        // close write stream
+        self.to_client_socket.close();
     }
 }
 
-impl actix::io::WriteHandler<bincode::Error> for UserSession {}
+impl actix::io::WriteHandler<bincode::Error> for ClientSession {}
 
 /// Handle messages from the tcp stream of the client (Client -> Server)
-impl StreamHandler<Result<ToServerMsg, bincode::Error>> for UserSession {
+impl StreamHandler<Result<ToServerMsg, bincode::Error>> for ClientSession {
     fn handle(&mut self, msg: Result<ToServerMsg, bincode::Error>, ctx: &mut Self::Context) {
         let msg = if let Ok(msg) = msg {
             msg
@@ -178,33 +202,3 @@ impl StreamHandler<Result<ToServerMsg, bincode::Error>> for UserSession {
 //         }
 //     }
 // }
-
-/// Helper functions for `UserSession`
-impl UserSession {
-    pub fn new(
-        server: Addr<GameServer>,
-        writer: ClientMessageWriter,
-        peer_addr: SocketAddr,
-    ) -> Self {
-        Self {
-            server,
-            peer_addr,
-            writer,
-            id: 0,
-            username: None,
-            state: UserState::Idle,
-        }
-    }
-
-    /// Close this session's sink and stopping the actor
-    fn close(&mut self, ctx: &mut Context<Self>) {
-        // self.server
-        //     .send(ServerRequest::Disconnect(self.id))
-        //     .into_actor(self)
-        //     .then(|_, this, ctx| {
-        //         ctx.stop();
-        //         async {}.into_actor(this)
-        //     })
-        //     .wait(ctx);
-    }
-}
