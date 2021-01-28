@@ -4,25 +4,7 @@ use bytes::{BufMut, BytesMut};
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::data::Username;
-
-// #[derive(Debug, Serialize, Deserialize, Clone)]
-// pub enum ToClientMsg {
-//     NewMessage(data::Message),
-//     NewLine(data::Line),
-//     InitialState(InitialState),
-//     SkribblStateChanged(SkribblState),
-//     GameOver(SkribblState),
-//     ClearCanvas,
-//     TimeChanged(u32),
-// }
-
-// #[derive(Debug, Serialize, Deserialize, Clone)]
-// pub struct InitialState {
-//     pub lines: Vec<data::Line>,
-//     pub dimensions: (usize, usize),
-//     pub skribbl_state: Option<SkribblState>,
-// }
+use crate::data::{Line, Username};
 
 // +----------+--------------------------------+
 // | len: u32 |          frame payload         |
@@ -112,23 +94,40 @@ impl fmt::Display for ChatMessage {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Draw {
     Clear,
-    Line(Line)
+    Line(Line),
 }
 
-// #[derive(actix::Message)]
-// #[rtype = "Option<Username>"]
-// pub struct RequestUsername(String);
-
-/// Server -> Client 
+/// Server -> Client
 #[derive(actix::Message, Debug, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
-pub struct ToClientMsg {}
+pub enum ServerMsg {
+    Game(GameAction),
+    MatchMake,
+    Disconnect,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum GameAction {
+    Draw(Draw),
+    // InitialState(InitialState),
+    // SkribblStateChanged(SkribblState),
+    // GameOver(SkribblState),
+    TimeChanged(u32),
+}
+
+// #[derive(Debug, Serialize, Deserialize, Clone)]
+// pub struct InitialState {
+//     pub lines: Vec<data::Line>,
+//     pub dimensions: (usize, usize),
+//     pub skribbl_state: Option<SkribblState>,
+// }
 
 /// Client -> Server
 #[derive(actix::Message, Debug, Serialize, Deserialize, Clone)]
 #[rtype(result = "()")]
-pub enum ToServerMsg {
+pub enum ClientMsg {
     Chat(ChatMessage),
-    Command(CommandMessage),
-    Draw(Draw)
+    Draw(Draw),
+    JoinRoom(String),
+    // Command(CommandMessage),
 }

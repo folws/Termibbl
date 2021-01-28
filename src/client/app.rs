@@ -1,8 +1,8 @@
 use crate::{
     client::error::Result,
     client::ui,
-    data::{self, CanvasColor, Coord, Line, Message},
-    message::{InitialState, ToClientMsg, ToServerMsg},
+    data::{self, CanvasColor, ChatMessage, Coord, Line},
+    message::{ClientMsg, Draw, InitialState, ServerMsg},
     server::skribbl::{PlayerState, SkribblState},
     ClientEvent,
 };
@@ -54,10 +54,19 @@ impl AppCanvas {
     pub fn draw_line(&mut self, line: Line) { self.lines.push(line); }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Chat {
     pub input: String,
-    pub messages: Vec<Message>,
+    pub messages: Vec<ChatMessage>,
+}
+
+impl Default for Chat {
+    fn default() -> Self {
+        Self {
+            input: String::default(),
+            messages: Vec::new() as Vec<ChatMessage>,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -127,7 +136,7 @@ impl App {
                     self.current_color,
                 );
                 self.canvas.draw_line(line);
-                self.session.send(ToServerMsg::NewLine(line)).await?;
+                self.session.send(ClientMsg::Draw(Draw::Line(line))).await?;
                 self.last_mouse_pos = Some(mouse_pos);
             }
             _ => {}
@@ -145,18 +154,18 @@ impl App {
                 }
 
                 let msg_content = self.chat.input.clone();
-                if msg_content.starts_with("!") {
-                    if msg_content.starts_with("!kick ") {
-                        let msg_without_cmd =
-                            msg_content.trim_start_matches("!kick ").trim().to_string();
-                        let command = CommandMsg::KickPlayer(Username::from(msg_without_cmd));
-                        self.session.send(ToServerMsg::CommandMsg(command)).await?;
-                    };
-                } else {
-                    let message =
-                        Message::UserMsg(self.session.username.clone(), self.chat.input.clone());
-                    self.session.send(ToServerMsg::Chat(message)).await?;
-                }
+                // if msg_content.starts_with("!") {
+                //     if msg_content.starts_with("!kick ") {
+                //         let msg_without_cmd =
+                //             msg_content.trim_start_matches("!kick ").trim().to_string();
+                //         let command = CommandMsg::KickPlayer(Username::from(msg_without_cmd));
+                //         self.session.send(ToServerMsg::CommandMsg(command)).await?;
+                //     };
+                // } else {
+                // }
+                let message =
+                    ChatMessage::UserMsg(self.session.username.clone(), self.chat.input.clone());
+                self.session.send(ClientMsg::Chat(message)).await?;
                 self.chat.input = String::new();
             }
             KeyCode::Backspace => {
@@ -167,7 +176,7 @@ impl App {
             }
             KeyCode::Delete => {
                 if self.is_drawing() {
-                    self.session.send(ToServerMsg::ClearCanvas).await?;
+                    self.session.send(ClientMsg::Draw(Draw::Clear)).await?;
                     self.canvas.lines.clear();
                 }
             }
@@ -188,24 +197,24 @@ impl App {
                 self.handle_mouse_event(mouse_evt).await?;
             }
             ClientEvent::ServerMessage(m) => match m {
-                ToClientMsg::TimeChanged(new_time) => {
+                ServerMsg::TimeChanged(new_time) => {
                     self.remaining_time = Some(new_time);
                 }
-                ToClientMsg::NewMessage(message) => self.chat.messages.push(message),
-                ToClientMsg::NewLine(line) => {
+                ServerMsg::NewMessage(message) => self.chat.messages.push(message),
+                ServerMsg::NewLine(line) => {
                     self.canvas.draw_line(line);
                 }
-                ToClientMsg::SkribblStateChanged(new_state) => {
+                ServerMsg::SkribblStateChanged(new_state) => {
                     self.game_state = Some(new_state);
                 }
-                ToClientMsg::ClearCanvas => {
+                ServerMsg::ClearCanvas => {
                     self.canvas.lines.clear();
                 }
-                ToClientMsg::GameOver(state) => {
+                ServerMsg::GameOver(state) => {
                     dbg!(state);
                     panic!("Game over, I couldn't yet be bothered to implement this in a better way yet,...");
                 }
-                ToClientMsg::InitialState(_) => {}
+                ServerMsg::InitialState(_) => {}
             },
         }
         Ok(())
@@ -229,7 +238,7 @@ impl App {
 
 #[derive(Debug, Clone)]
 pub struct ServerSession {
-    to_server_send: tokio::sync::mpsc::Sender<ToServerMsg>,
+    to_server_send: tokio::sync::mpsc::Sender<ClientMsg>,
     pub username: Username,
 }
 
@@ -239,7 +248,7 @@ impl ServerSession {
         username: Username,
         mut evt_send: tokio::sync::mpsc::Sender<ClientEvent>,
     ) -> Result<App> {
-        let (to_server_send, mut to_server_recv) = tokio::sync::mpsc::channel::<ToServerMsg>(1);
+        let (to_server_send, mut to_server_recv) = tokio::sync::mpsc::channel::<ClientMsg>(1);
 
         let ws: WebSocketStream<_> = tokio_tungstenite::connect_async(addr)
             .await
@@ -257,7 +266,7 @@ impl ServerSession {
         let initial_state: InitialState = loop {
             let msg = ws_recv.next().await;
             if let Some(Ok(tungstenite::Message::Text(msg))) = msg {
-                if let Ok(ToClientMsg::InitialState(state)) = serde_json::from_str(&msg) {
+                if let Ok(ServerMsg::InitialState(state)) = serde_json::from_str(&msg) {
                     break state;
                 }
             }
@@ -300,7 +309,7 @@ impl ServerSession {
         ))
     }
 
-    pub async fn send(&mut self, message: ToServerMsg) -> Result<()> {
+    pub async fn send(&mut self, message: ClientMsg) -> Result<()> {
         self.to_server_send.send(message).await?;
         Ok(())
     }

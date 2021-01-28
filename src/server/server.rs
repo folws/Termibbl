@@ -20,13 +20,6 @@ pub const ROUND_DURATION: u64 = 120;
 
 type Result<T> = std::result::Result<T, ServerError>;
 
-#[derive(Debug)]
-enum ServerEvent {
-    ToServerMsg(Username, ToServerMsg),
-    UserJoined(UserSession),
-    UserLeft(Username),
-    Tick,
-}
 
 #[derive(Debug)]
 struct UserSession {

@@ -3,18 +3,32 @@ use std::{cmp::Ordering, fmt::Display};
 use tui::style::Color;
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Serialize, Deserialize, Ord, PartialOrd)]
-pub struct Username(String);
+pub struct Username {
+    name: String,
+    unique_id: Option<String>,
+}
+
+impl Username {
+    pub fn identifier(&self) -> Option<String> { self.unique_id }
+}
 
 impl From<String> for Username {
-    fn from(s: String) -> Self { Username(s) }
+    fn from(name: String) -> Self {
+        Username {
+            name,
+            unique_id: None,
+        }
+    }
 }
 
 impl From<Username> for String {
-    fn from(u: Username) -> Self { u.0 }
+    fn from(u: Username) -> Self { u.name }
 }
 
 impl Display for Username {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, Serialize, Deserialize)]

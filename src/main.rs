@@ -7,7 +7,7 @@ use argh::FromArgs;
 use std::io::{stdout, Write};
 
 use client::app::ServerSession;
-use data::Username;
+pub use data::Username;
 pub use serde::{Deserialize, Serialize};
 
 #[derive(FromArgs)]
@@ -24,12 +24,12 @@ enum SubOpt {
     Client(client::CliOpts),
 }
 
-#[actix_rt::main]
-async fn main() {
+fn main() {
+    pretty_env_logger::init();
     let cli: Opt = argh::from_env();
 
     match cli.cmd {
         SubOpt::Client(opts) => client::run_with_opts(opts),
-        SubOpt::Server(opts) => server::run_with_opts(opts).await.unwrap(),
-    }
+        SubOpt::Server(opts) => server::run_with_opts(opts),
+    };
 }

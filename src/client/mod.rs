@@ -9,14 +9,14 @@ use crossterm::{
     event::{read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEvent},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    Result,
 };
 
+use error::Result;
 use tui::{backend::CrosstermBackend, Terminal};
 
 #[derive(FromArgs)]
 /// play Skribbl.io-like games in the Termibbl
-#[argh(subcommand, name  "client")]
+#[argh(subcommand, name = "client")]
 pub struct CliOpts {
     #[argh(positional)]
     ///username to connect as.
@@ -28,7 +28,7 @@ pub struct CliOpts {
 }
 
 /// main entry point for the client.
-pub async fn run_with_opts(opts: CliOpts) {
+pub fn run_with_opts(opts: CliOpts) {
     let addr = opts.addr;
     let addr = if addr.starts_with("ws://") || addr.starts_with("wss://") {
         addr
@@ -36,24 +36,30 @@ pub async fn run_with_opts(opts: CliOpts) {
         format!("ws://{}", addr)
     };
 
-    run_client(addr, opts.username).await;
+    run_client(addr, opts.username.into());
 }
 
 pub enum ClientEvent {
     MouseInput(MouseEvent),
     KeyInput(KeyEvent),
-    ServerMessage(message::ToClientMsg),
+    ServerMessage(message::ServerMsg),
 }
 
-async fn run_client(addr: &str, username: Username) -> error::Result<()> {
+fn setup_tui() -> Result<()> {
+    enable_raw_mode()?;
+    execute!(stdout(), EnterAlternateScreen)?;
+    execute!(stdout(), EnableMouseCapture)?;
+}
+
+#[tokio::main]
+async fn run_client(addr: String, username: Username) -> Result<()> {
     let (mut client_evt_send, client_evt_recv) = tokio::sync::mpsc::channel::<ClientEvent>(1);
 
     let mut app =
         ServerSession::establish_connection(addr, username, client_evt_send.clone()).await?;
 
-    enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
-    execute!(stdout(), EnableMouseCapture)?;
+    setup_tui();
+
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
     tokio::spawn(async move {
