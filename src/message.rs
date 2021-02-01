@@ -1,4 +1,4 @@
-use crate::{data, server::skribbl::SkribblState};
+use crate::{data, network::ChatMessage, server::skribbl::SkribblState};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -17,6 +17,15 @@ pub enum ToServerMsg {
     CommandMsg(data::CommandMsg),
     NewLine(data::Line),
     ClearCanvas,
+}
+/// Client -> Server
+#[derive(actix::Message, Debug, Serialize, Deserialize, Clone)]
+#[rtype(result = "()")]
+pub enum ClientMsg {
+    Chat(ChatMessage),
+    Draw(data::Draw),
+    JoinRoom(String),
+    // Command(CommandMessage),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

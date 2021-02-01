@@ -1,10 +1,7 @@
-pub mod client;
-pub mod data;
-pub mod message;
-pub mod server;
-
+use actix::prelude::*;
 use argh::FromArgs;
 use log::info;
+use server::{GameOpts, GameServer};
 
 use std::io::{stdout, Write};
 
@@ -19,7 +16,12 @@ use tui::{backend::CrosstermBackend, Terminal};
 
 use client::app::ServerSession;
 use data::Username;
-pub use serde::{Deserialize, Serialize};
+
+mod client;
+mod data;
+mod message;
+mod network;
+mod server;
 
 #[derive(FromArgs)]
 /// A Skribbl.io-alike for the terminal
@@ -33,7 +35,17 @@ struct Opt {
 enum SubOpt {
     Server(server::CliOpts),
     Client(client::CliOpts),
+    Test(TestOpts),
 }
+
+#[derive(FromArgs)]
+/// test
+#[argh(subcommand, name = "test")]
+pub struct TestOpts {}
+
+#[derive(actix::Message)]
+#[rtype(result = "()")]
+struct StopSignal;
 
 fn display_public_ip(port: u32) {
     tokio::spawn(async move {
@@ -46,12 +58,25 @@ fn display_public_ip(port: u32) {
     });
 }
 
-#[tokio::main]
+#[actix_rt::main]
 async fn main() -> Result<()> {
     pretty_env_logger::init();
 
     let cli: Opt = argh::from_env();
     match cli.cmd {
+        SubOpt::Test(_) => {
+            println!(
+                "{:?}",
+                bincode::serialize(&network::ClientMsg::Chat(network::ChatMessage::SystemMsg(
+                    "something".to_owned()
+                )))
+            );
+            // let mut stream = tokio::net::TcpStream::connect("127.0.0.1:9001").await?;
+            // println!("created stream");
+
+            // let result = stream.write(b"hello world\n").await;
+            // println!("wrote to stream; success={:?}", result.is_ok());
+        }
         SubOpt::Client(opt) => {
             let addr = opt.addr;
             let addr = if addr.starts_with("ws://") || addr.starts_with("wss://") {
@@ -70,12 +95,26 @@ async fn main() -> Result<()> {
                 display_public_ip(port);
             }
 
-            // let default_game_opts: GameOpts = opt.into();
-            // let server_listener = server::listen(port);
+            let default_game_opts: GameOpts = opt.into();
+            let addr = format!("127.0.0.1:{}", port);
 
-            server::server::run_server(opt).await.unwrap();
+            // start tcp listener :: TODO: maybe use udp instead?
+            let server_listener = server::listen(&addr).await;
+
+            // start game server
+            let game_server = GameServer::start(server_listener, default_game_opts);
+
+            println!("🚀 Running Termibbl server on {}...", addr);
+
+            tokio::signal::ctrl_c().await.unwrap();
+            println!("Ctrl-C received. Stopping..");
+
+            // gracefully exit
+            game_server.do_send(StopSignal);
         }
     }
+
+    System::current().stop();
     Ok(())
 }
 

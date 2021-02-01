@@ -2,13 +2,18 @@ use std::io::Read;
 
 use argh::FromArgs;
 use log::{debug, info};
+use tokio::net::TcpListener;
 
-pub mod server;
+pub mod game;
+mod session;
 pub mod skribbl;
 
-const DIMEN: (usize, usize) = (900, 60);
+pub use game::GameServer;
+
+const DIMENSIONS: (usize, usize) = (900, 60);
 const ROUND_DURATION: usize = 120;
 const ROUNDS: usize = 3;
+const ROOM_KEY_LENGTH: usize = 5;
 
 #[derive(FromArgs)]
 /// host a Termibbl session
@@ -31,7 +36,7 @@ pub struct CliOpts {
     rounds: usize,
 
     /// default canvas dimensions <width>x<height>
-    #[argh(option, from_str_fn(parse_dimension), default = "DIMEN")]
+    #[argh(option, from_str_fn(parse_dimension), default = "DIMENSIONS")]
     dimensions: (usize, usize),
 
     /// optional path to custom word list
@@ -68,7 +73,7 @@ fn read_words_file(path: &str) -> Result<Vec<String>, String> {
         .collect::<Vec<String>>())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct GameOpts {
     pub dimensions: (usize, usize),
     pub words: Vec<String>,
@@ -90,4 +95,13 @@ impl From<CliOpts> for GameOpts {
             round_duration: default_round_duration,
         }
     }
+}
+
+/// start tcp listener on given port
+pub(crate) async fn listen(addr: &str) -> Box<TcpListener> {
+    Box::new(
+        TcpListener::bind(&addr)
+            .await
+            .expect("Could not start webserver (could not bind)"),
+    )
 }

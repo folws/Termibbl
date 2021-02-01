@@ -1,4 +1,4 @@
-use super::server::ROUND_DURATION;
+use super::game::ROUND_DURATION;
 use crate::client::Username;
 use rand::{prelude::IteratorRandom, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
@@ -26,13 +26,9 @@ pub struct SkribblState {
 }
 
 impl SkribblState {
-    pub fn current_word(&self) -> &str {
-        &self.current_word
-    }
+    pub fn current_word(&self) -> &str { &self.current_word }
 
-    pub fn revealed_characters(&self) -> &[usize] {
-        self.revealed_characters.as_ref()
-    }
+    pub fn revealed_characters(&self) -> &[usize] { self.revealed_characters.as_ref() }
 
     pub fn set_current_word(&mut self, word: String) {
         self.current_word = word;
@@ -100,9 +96,7 @@ impl SkribblState {
         }
     }
 
-    pub fn is_drawing(&self, username: &Username) -> bool {
-        self.drawing_user == *username
-    }
+    pub fn is_drawing(&self, username: &Username) -> bool { self.drawing_user == *username }
     pub fn can_guess(&self, username: &Username) -> bool {
         !self.is_drawing(username)
             && !self
